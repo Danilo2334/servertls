@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Login Seguro</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<div class="container">
+    <h2>🔒 Login Seguro</h2>
+
+    <div class="input-group">
+        <input id="username" placeholder="Usuario">
+        <input id="password" type="password" placeholder="Contraseña">
+    </div>
+
+    <button onclick="login()" class="btn-login">Iniciar sesión</button>
+
+    <div id="section-2fa" style="display:none;">
+        <h3>2FA</h3>
+        <button onclick="configurar2FA()">Generar QR</button>
+        <div id="qr-container"></div>
+        <input id="codigo2fa" placeholder="Código">
+        <button onclick="verificar2FA()">Verificar</button>
+    </div>
+
+</div>
+
+<script src="/script.js"></script>
+<script src="/auth.js"></script>
+
+</body>
+</html>
