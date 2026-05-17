@@ -55,10 +55,14 @@ app.post('/api/register', async (req, res) => {
 app.post('/api/login', async (req, res) => {
     const { username, password } = req.body;
 
-    const user = await db.get(
-        'SELECT * FROM users WHERE username = ?',
-        [username]
-    );
+    const query = `
+    SELECT * FROM users
+    WHERE username = '${username}'
+`;
+
+    console.log("QUERY:", query);
+
+    const user = await db.get(query);
 
     if (!user) return res.status(401).json({ error: "Usuario no existe" });
 
