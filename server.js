@@ -78,7 +78,33 @@ app.post('/api/login', async (req, res) => {
     });
 });
 
-// 🔐 Generar QR
+// � Endpoint vulnerable SQL Injection
+app.get('/api/search', async (req, res) => {
+
+    const username = req.query.username;
+
+    const query = `
+        SELECT * FROM users
+        WHERE username = '${username}'
+    `;
+
+    console.log("QUERY:", query);
+
+    try {
+
+        const users = await db.all(query);
+
+        res.json(users);
+
+    } catch (e) {
+
+        res.status(500).json({
+            error: e.message
+        });
+    }
+});
+
+// �🔐 Generar QR
 app.post('/api/2fa/setup', authenticateToken, (req, res) => {
     const secret = speakeasy.generateSecret({
         name: `ServidorTLS (${req.user.name})`
