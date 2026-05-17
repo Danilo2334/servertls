@@ -111,6 +111,28 @@ app.post('/api/2fa/verify', authenticateToken, async (req, res) => {
     }
 });
 
+// ✅ Endpoint seguro contra SQL Injection
+app.get('/api/search', async (req, res) => {
+
+    const username = req.query.username;
+
+    try {
+
+        const users = await db.all(
+            'SELECT * FROM users WHERE username = ?',
+            [username]
+        );
+
+        res.json(users);
+
+    } catch (e) {
+
+        res.status(500).json({
+            error: e.message
+        });
+    }
+});
+
 // 🚀 Servidor
 app.listen(3000, () => {
     console.log("🚀 Servidor corriendo en http://localhost:3000");
