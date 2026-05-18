@@ -1,3 +1,5 @@
+const { sendThreat } = require('./kafkaClient/producer');
+const fs = require('fs');
 const express = require('express');
 const path = require('path');
 const jwt = require('jsonwebtoken');
@@ -10,9 +12,11 @@ const app = express();
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-const SECRET_KEY = "mi_clave_super_secreta_123";
+const PRIVATE_KEY = fs.readFileSync('./keys/private.pem');
+const PUBLIC_KEY = fs.readFileSync('./keys/public.pem');
 
 let db;
+let refreshTokens = []; // Para almacenar tokens de refresco (en memoria para demo)
 
 setupDB().then(database => {
     db = database;
@@ -26,7 +30,11 @@ function authenticateToken(req, res, next) {
 
     if (!token) return res.status(401).json({ error: "Token requerido" });
 
-    jwt.verify(token, SECRET_KEY, (err, user) => {
+    jwt.verify(
+        token,
+        PUBLIC_KEY,
+        { algorithms: ['RS256'] },
+        (err, user) => {
         if (err) return res.status(403).json({ error: "Token inválido" });
         req.user = user;
         next();
@@ -35,14 +43,15 @@ function authenticateToken(req, res, next) {
 
 // 🧾 Registro
 app.post('/api/register', async (req, res) => {
-    const { username, password } = req.body;
+    const { username, password, role } = req.body;
 
     const hash = await bcrypt.hash(password, 10);
 
     try {
         await db.run(
-            'INSERT INTO users (username, password_hash) VALUES (?, ?)',
-            [username, hash]
+            `INSERT INTO users (username, password_hash, role)
+             VALUES (?, ?, ?)`,
+            [username, hash, role || 'analyst']
         );
 
         res.json({ mensaje: "Usuario creado" });
@@ -66,12 +75,108 @@ app.post('/api/login', async (req, res) => {
 
     if (!valid) return res.status(401).json({ error: "Contraseña incorrecta" });
 
-    const token = jwt.sign({ name: user.username }, SECRET_KEY, { expiresIn: '1h' });
+    // 🔐 Admin requiere 2FA
+    if (user.role === 'admin' && !user.twofa_secret) {
+
+        const tempToken = jwt.sign(
+            {
+                name: user.username,
+                role: user.role,
+                setup2FA: true
+            },
+            PRIVATE_KEY,
+            {
+                algorithm: 'RS256',
+                expiresIn: '10m'
+            }
+        );
+
+        return res.status(403).json({
+            error: "Admin debe activar 2FA",
+            setupToken: tempToken
+        });
+    }
+
+    const accessToken = jwt.sign(
+        { name: user.username },
+        PRIVATE_KEY,
+        {
+            algorithm: 'RS256',
+            expiresIn: '15m'
+        }
+    );
+
+    const refreshToken = jwt.sign(
+        { name: user.username },
+        PRIVATE_KEY,
+        {
+            algorithm: 'RS256',
+            expiresIn: '7d'
+        }
+    );
+
+    refreshTokens.push(refreshToken);
 
     res.json({
-        token,
+        accessToken,
+        refreshToken,
         has2FA: !!user.twofa_secret
     });
+});
+
+// 🔄 Refresh Token
+app.post('/api/refresh', (req, res) => {
+
+    const { refreshToken } = req.body;
+
+    if (!refreshToken) {
+
+        return res.status(401).json({
+            error: 'Refresh token requerido'
+        });
+    }
+
+    if (!refreshTokens.includes(refreshToken)) {
+
+        return res.status(403).json({
+            error: 'Refresh token inválido'
+        });
+    }
+
+    jwt.verify(
+
+        refreshToken,
+
+        PUBLIC_KEY,
+
+        { algorithms: ['RS256'] },
+
+        (err, user) => {
+
+            if (err) {
+
+                return res.status(403).json({
+                    error: 'Refresh token expirado'
+                });
+            }
+
+            const newAccessToken = jwt.sign(
+
+                { name: user.name },
+
+                PRIVATE_KEY,
+
+                {
+                    algorithm: 'RS256',
+                    expiresIn: '15m'
+                }
+            );
+
+            res.json({
+                accessToken: newAccessToken
+            });
+        }
+    );
 });
 
 // 🔐 Generar QR
@@ -133,7 +238,61 @@ app.get('/api/search', async (req, res) => {
     }
 });
 
-// 🚀 Servidor
+// � Enviar amenaza a Kafka
+app.post('/api/threat', async (req, res) => {
+
+    try {
+
+        const { severity, message, ip } = req.body;
+
+        await db.run(
+            `INSERT INTO threats (severity, message, ip)
+             VALUES (?, ?, ?)`,
+            [severity, message, ip]
+        );
+
+        await sendThreat({
+            severity,
+            message,
+            ip
+        });
+
+        console.log("🚨 Amenaza enviada:", {
+            severity,
+            message,
+            ip
+        });
+
+        res.json({
+            success: true,
+            threat: {
+                severity,
+                message,
+                ip
+            }
+        });
+
+    } catch (e) {
+
+        console.error(e);
+
+        res.status(500).json({
+            error: e.message
+        });
+    }
+});
+// 📋 Obtener amenazas
+app.get('/api/alerts', authenticateToken, async (req, res) => {
+
+    const alerts = await db.all(`
+        SELECT *
+        FROM threats
+        ORDER BY created_at DESC
+    `);
+
+    res.json(alerts);
+});
+// �🚀 Servidor
 app.listen(3000, () => {
     console.log("🚀 Servidor corriendo en http://localhost:3000");
 });
